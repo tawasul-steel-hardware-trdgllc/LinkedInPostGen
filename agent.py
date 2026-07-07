@@ -1,0 +1,261 @@
+"""AI Agent responsible for generating LinkedIn posts from YouTube transcripts."""
+
+import os
+import json
+
+from dotenv import load_dotenv
+from openai import OpenAI, OpenAIError, AuthenticationError, RateLimitError
+from youtube_transcript_api import (
+    YouTubeTranscriptApi,
+    NoTranscriptFound,
+    TranscriptsDisabled,
+    VideoUnavailable,
+)
+
+load_dotenv()
+
+# ---------------------------------------------------------------------------
+# Custom exceptions
+# ---------------------------------------------------------------------------
+
+class TranscriptError(Exception):
+    """Raised when a transcript cannot be fetched for any reason."""
+
+
+class PostGenerationError(Exception):
+    """Raised when LinkedIn post generation fails."""
+
+
+# ---------------------------------------------------------------------------
+# Tool definition exposed to the OpenAI agent
+# ---------------------------------------------------------------------------
+
+GENERATE_POST_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "generate_linkedin_post",
+        "description": (
+            "Generate a professional LinkedIn post from a YouTube video transcript. "
+            "The post includes a strong opening hook, 3-4 key insights, "
+            "professional formatting, and relevant hashtags."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "transcript": {
+                    "type": "string",
+                    "description": "The full transcript text of the YouTube video.",
+                },
+            },
+            "required": ["transcript"],
+        },
+    },
+}
+
+# System prompt that shapes the post style
+_SYSTEM_PROMPT = """\
+You are an expert LinkedIn content creator. When given a video transcript, you produce
+a single, ready-to-publish LinkedIn post that follows this exact structure:
+
+1. HOOK (1-2 lines) — a bold, curiosity-driven opening that stops the scroll.
+2. BLANK LINE
+3. KEY INSIGHTS — exactly 3-4 bullet points (use the emoji ▶ as the bullet).
+   Each insight is one concise sentence drawn directly from the transcript.
+4. BLANK LINE
+5. CLOSING LINE — one actionable takeaway or thought-provoking question.
+6. BLANK LINE
+7. HASHTAGS — 5-7 relevant hashtags on a single line.
+
+Rules:
+- Write in first-person, professional but conversational tone.
+- No filler phrases like "In this video..." or "The speaker says...".
+- Keep the total post under 1 300 characters (LinkedIn sweet spot).
+- Output ONLY the post text — no explanations, no markdown code fences.
+"""
+
+
+class LinkedInPostAgent:
+    """Agent that uses OpenAI to generate LinkedIn posts from YouTube video transcripts."""
+
+    def __init__(self):
+        """Initialize the agent, loading the OpenAI API key from the environment."""
+        api_key = os.getenv("OPENAI_API_KEY")
+        if not api_key:
+            raise EnvironmentError(
+                "OPENAI_API_KEY is not set. "
+                "Copy .env.example to .env and add your key."
+            )
+        self.client = OpenAI(api_key=api_key)
+        self.tools = [GENERATE_POST_TOOL]
+
+    def fetch_transcript(self, video_id: str) -> str:
+        """Fetch the full transcript for a YouTube video.
+
+        Args:
+            video_id: The YouTube video ID (e.g. 'dQw4w9WgXcQ').
+
+        Returns:
+            The full transcript as a single string of text.
+
+        Raises:
+            TranscriptError: If the transcript is unavailable for any reason.
+        """
+        try:
+            api = YouTubeTranscriptApi()
+            transcript = api.fetch(video_id)
+            return " ".join(entry.text for entry in transcript)
+
+        except TranscriptsDisabled:
+            raise TranscriptError(
+                f"Transcripts are disabled for video '{video_id}'. "
+                "The video owner has turned off captions."
+            )
+        except NoTranscriptFound:
+            raise TranscriptError(
+                f"No transcript found for video '{video_id}'. "
+                "Try a different language or check if captions exist."
+            )
+        except VideoUnavailable:
+            raise TranscriptError(
+                f"Video '{video_id}' is unavailable. "
+                "It may be private, deleted, or region-restricted."
+            )
+        except Exception as e:
+            raise TranscriptError(
+                f"An unexpected error occurred while fetching the transcript: {e}"
+            ) from e
+
+    def generate_post(self, transcript: str) -> str:
+        """Generate a professional LinkedIn post from a video transcript.
+
+        This method is registered as an OpenAI tool (see GENERATE_POST_TOOL) so
+        the agent can invoke it autonomously during a tool-use loop.
+
+        Args:
+            transcript: The full transcript text of the YouTube video.
+
+        Returns:
+            A ready-to-publish LinkedIn post as a plain string.
+
+        Raises:
+            PostGenerationError: If the OpenAI call fails for any reason.
+        """
+        if not transcript or not transcript.strip():
+            raise PostGenerationError("Transcript is empty — cannot generate a post.")
+
+        # Truncate to ~12 000 chars to stay within model context limits
+        truncated = transcript[:12_000]
+
+        try:
+            response = self.client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {"role": "system", "content": _SYSTEM_PROMPT},
+                    {
+                        "role": "user",
+                        "content": (
+                            "Here is the video transcript. "
+                            "Generate the LinkedIn post now:\n\n"
+                            + truncated
+                        ),
+                    },
+                ],
+                temperature=0.7,
+                max_tokens=1200,
+            )
+            post = response.choices[0].message.content
+            if not post:
+                raise PostGenerationError(
+                    f"OpenAI returned an empty response. "
+                    f"Finish reason: {response.choices[0].finish_reason}"
+                )
+            return post.strip()
+
+        except AuthenticationError:
+            raise PostGenerationError(
+                "Invalid OpenAI API key. Check the OPENAI_API_KEY value in your .env file."
+            )
+        except RateLimitError:
+            raise PostGenerationError(
+                "OpenAI rate limit reached. Wait a moment and try again."
+            )
+        except OpenAIError as e:
+            raise PostGenerationError(
+                f"OpenAI API error while generating the post: {e}"
+            ) from e
+        except Exception as e:
+            raise PostGenerationError(
+                f"Unexpected error during post generation: {e}"
+            ) from e
+
+    def _handle_tool_call(self, tool_name: str, tool_args: dict) -> str:
+        """Dispatch a tool call requested by the OpenAI agent.
+
+        Args:
+            tool_name: Name of the tool the model wants to invoke.
+            tool_args:  Parsed JSON arguments for that tool.
+
+        Returns:
+            The tool result as a string to feed back to the model.
+        """
+        if tool_name == "generate_linkedin_post":
+            return self.generate_post(tool_args["transcript"])
+        raise PostGenerationError(f"Unknown tool requested by agent: '{tool_name}'")
+
+    def run(self, video_id: str) -> dict:
+        """Run the full agent pipeline for a given YouTube video ID.
+
+        This method:
+          1. Fetches the YouTube video transcript.
+          2. Uses OpenAI to generate a LinkedIn post from the transcript.
+          3. Returns the formatted result.
+
+        Args:
+            video_id: The YouTube video ID to process.
+
+        Returns:
+            A dict with the following keys:
+              - ``post``        (str)  : The finished LinkedIn post.
+              - ``video_id``    (str)  : The video ID that was processed.
+              - ``word_count``  (int)  : Approximate word count of the post.
+              - ``char_count``  (int)  : Character count of the post.
+              - ``status``      (str)  : "success" or "error".
+              - ``error``       (str | None): Error message when status is "error".
+
+        Raises:
+            TranscriptError: If the transcript cannot be fetched.
+            PostGenerationError: If post generation fails.
+        """
+        # --- Step 1: fetch transcript ---
+        transcript = self.fetch_transcript(video_id)
+        
+        # Validate transcript has enough content
+        if not transcript or not transcript.strip():
+            raise PostGenerationError(
+                "Transcript fetched but is empty. The video may have no captions or the transcript could not be retrieved."
+            )
+        
+        print(f"[INFO] Transcript fetched: {len(transcript)} characters, {len(transcript.split())} words")
+
+        # --- Step 2: generate post directly ---
+        # Use the generate_post method which handles the OpenAI call directly
+        # This is more reliable than using a tool-use agent loop
+        post = self.generate_post(transcript)
+        
+        return self._format_result(video_id, post)
+
+    # ---------------------------------------------------------------------------
+    # Private helpers
+    # ---------------------------------------------------------------------------
+
+    @staticmethod
+    def _format_result(video_id: str, post: str) -> dict:
+        """Package the finished post into a clean, structured result dict."""
+        return {
+            "status": "success",
+            "video_id": video_id,
+            "post": post,
+            "word_count": len(post.split()),
+            "char_count": len(post),
+            "error": None,
+        }
