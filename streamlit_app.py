@@ -74,8 +74,7 @@ with st.sidebar:
     api_key_input = st.text_input(
         "OpenAI API Key",
         type="password",
-        help="Enter your OpenAI API key. For production, use Streamlit Secrets.",
-        value=os.getenv("OPENAI_API_KEY", "")
+        help="Enter your OpenAI API key. For production, use Streamlit Secrets."
     )
     
     st.markdown("---")
