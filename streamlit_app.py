@@ -68,7 +68,7 @@ def extract_video_id(raw: str) -> str:
 
 # Sidebar - API Key Configuration
 with st.sidebar:
-    st.header("⚙️ Settings")
+    
     
     
     st.markdown("---")
