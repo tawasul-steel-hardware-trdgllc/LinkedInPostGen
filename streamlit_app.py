@@ -70,12 +70,6 @@ def extract_video_id(raw: str) -> str:
 with st.sidebar:
     st.header("⚙️ Settings")
     
-    # API Key input (for development/testing)
-    api_key_input = st.text_input(
-        "OpenAI API Key",
-        type="password",
-        help="Enter your OpenAI API key. For production, use Streamlit Secrets."
-    )
     
     st.markdown("---")
     st.markdown("**How to use:**")
