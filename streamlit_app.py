@@ -66,10 +66,12 @@ def extract_video_id(raw: str) -> str:
         return raw
     return raw
 
-# Sidebar - API Key Configuration
+# Sidebar - Configuration
 with st.sidebar:
-    
-    
+    st.markdown("**📡 Proxy Status**")
+    st.write("YOUTUBE_PROXY_HTTP set:", bool(os.getenv("YOUTUBE_PROXY_HTTP")))
+    st.write("YOUTUBE_PROXY_HTTPS set:", bool(os.getenv("YOUTUBE_PROXY_HTTPS")))
+    st.write("YOUTUBE_VERIFY_SSL:", os.getenv("YOUTUBE_VERIFY_SSL") or "true")
     
     st.markdown("---")
     st.markdown("**How to use:**")
@@ -105,12 +107,12 @@ if st.button("✨ Generate LinkedIn Post", type="primary", use_container_width=T
         st.error("Please enter a YouTube video URL or ID.")
         st.stop()
     
-    # Get API key - prioritize Streamlit Secrets, then sidebar input, then env var
+    # Get API key - prioritize Streamlit Secrets, then env var
     api_key = None
     try:
         api_key = st.secrets["OPENAI_API_KEY"]
     except:
-        api_key = api_key_input if api_key_input else os.getenv("OPENAI_API_KEY")
+        api_key = os.getenv("OPENAI_API_KEY")
     
     if not api_key:
         st.error("""
@@ -118,8 +120,7 @@ if st.button("✨ Generate LinkedIn Post", type="primary", use_container_width=T
         
         Please add your OpenAI API key in one of these ways:
         1. **Streamlit Secrets** (recommended for deployment) - Add in Streamlit Cloud dashboard
-        2. **Sidebar** - Enter in the settings panel on the left
-        3. **.env file** (for local development only)
+        2. **.env file** (for local development) - Set OPENAI_API_KEY in your .env file
         """)
         st.stop()
     
