@@ -5,6 +5,7 @@ import json
 
 from dotenv import load_dotenv
 from openai import OpenAI, OpenAIError, AuthenticationError, RateLimitError
+from requests import Session
 from youtube_transcript_api import (
     YouTubeTranscriptApi,
     NoTranscriptFound,
@@ -74,6 +75,38 @@ Rules:
 """
 
 
+# ---------------------------------------------------------------------------
+# Proxy-aware YouTubeTranscriptApi factory
+# ---------------------------------------------------------------------------
+
+def _create_youtube_transcript_api():
+    """Create YouTubeTranscriptApi with optional ScraperAPI proxy settings.
+
+    Reads the following environment variables (set them in .env):
+      YOUTUBE_PROXY_HTTP    — http proxy URL (e.g.
+                              http://scraperapi:KEY@proxy-server.scraperapi.com:8001)
+      YOUTUBE_PROXY_HTTPS   — https proxy URL (same format)
+      YOUTUBE_VERIFY_SSL    — set to "false" to disable SSL verification (default "true")
+    """
+    http_proxy = os.getenv("YOUTUBE_PROXY_HTTP")
+    https_proxy = os.getenv("YOUTUBE_PROXY_HTTPS")
+    verify_ssl = os.getenv("YOUTUBE_VERIFY_SSL", "true").lower() != "false"
+
+    http_client = Session()
+    http_client.verify = verify_ssl
+
+    proxies = {}
+    if http_proxy:
+        proxies["http"] = http_proxy
+    if https_proxy:
+        proxies["https"] = https_proxy
+
+    if proxies:
+        http_client.proxies.update(proxies)
+
+    return YouTubeTranscriptApi(http_client=http_client)
+
+
 class LinkedInPostAgent:
     """Agent that uses OpenAI to generate LinkedIn posts from YouTube video transcripts."""
 
@@ -91,6 +124,9 @@ class LinkedInPostAgent:
     def fetch_transcript(self, video_id: str) -> str:
         """Fetch the full transcript for a YouTube video.
 
+        Uses ScraperAPI proxy settings from environment variables if configured,
+        so the app works reliably in regions where direct YouTube access is restricted.
+
         Args:
             video_id: The YouTube video ID (e.g. 'dQw4w9WgXcQ').
 
@@ -101,7 +137,7 @@ class LinkedInPostAgent:
             TranscriptError: If the transcript is unavailable for any reason.
         """
         try:
-            api = YouTubeTranscriptApi()
+            api = _create_youtube_transcript_api()
             transcript = api.fetch(video_id)
             return " ".join(entry.text for entry in transcript)
 
