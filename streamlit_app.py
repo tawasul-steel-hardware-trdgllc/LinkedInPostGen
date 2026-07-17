@@ -107,14 +107,22 @@ if st.button("✨ Generate LinkedIn Post", type="primary", use_container_width=T
         st.error("Please enter a YouTube video URL or ID.")
         st.stop()
     
-    # Get API key - prioritize Streamlit Secrets, then env var
-    api_key = None
-    try:
-        api_key = st.secrets["OPENAI_API_KEY"]
-    except:
-        api_key = os.getenv("OPENAI_API_KEY")
-    
-    if not api_key:
+    # Load secrets into environment variables for the agent
+    # Prioritize Streamlit Secrets, then fall back to existing env vars / .env file
+    for secret_key in [
+        "OPENAI_API_KEY",
+        "YOUTUBE_PROXY_HTTP",
+        "YOUTUBE_PROXY_HTTPS",
+        "YOUTUBE_VERIFY_SSL",
+    ]:
+        try:
+            value = st.secrets[secret_key]
+        except Exception:
+            value = os.getenv(secret_key)
+        if value:
+            os.environ[secret_key] = value
+
+    if not os.getenv("OPENAI_API_KEY"):
         st.error("""
         🔑 **API Key Missing**
         
@@ -123,9 +131,6 @@ if st.button("✨ Generate LinkedIn Post", type="primary", use_container_width=T
         2. **.env file** (for local development) - Set OPENAI_API_KEY in your .env file
         """)
         st.stop()
-    
-    # Set environment variable for the agent
-    os.environ["OPENAI_API_KEY"] = api_key
     
     video_id = extract_video_id(video_input)
     
