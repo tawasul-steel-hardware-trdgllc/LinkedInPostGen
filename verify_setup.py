@@ -23,6 +23,15 @@ ENV_VARS_TO_CHECK = [
 ]
 
 
+def _get_secret_or_env(key: str, default: str | None = None) -> str | None:
+    """Get a config value from Streamlit Secrets first, then os.environ / .env."""
+    try:
+        import streamlit as st
+        return st.secrets.get(key, os.getenv(key, default))
+    except Exception:
+        return os.getenv(key, default)
+
+
 def verify():
     all_ok = True
     print(f"Python version: {sys.version}\n")
@@ -43,7 +52,7 @@ def verify():
     print("\nChecking environment variables...")
     print("-" * 40)
     for var in ENV_VARS_TO_CHECK:
-        value = os.getenv(var)
+        value = _get_secret_or_env(var)
         if value:
             if var == "OPENAI_API_KEY":
                 masked = value[:8] + "..." + value[-4:] if len(value) > 12 else "[set]"
@@ -63,10 +72,20 @@ def verify():
     from youtube_transcript_api import YouTubeTranscriptApi
 
     http_client = Session()
-    http_proxy = os.getenv("YOUTUBE_PROXY_HTTP")
-    https_proxy = os.getenv("YOUTUBE_PROXY_HTTPS")
-    verify_ssl = os.getenv("YOUTUBE_VERIFY_SSL", "true").lower() != "false"
-    http_client.verify = verify_ssl
+    http_proxy = _get_secret_or_env("YOUTUBE_PROXY_HTTP")
+    https_proxy = _get_secret_or_env("YOUTUBE_PROXY_HTTPS")
+    verify_ssl = _get_secret_or_env("YOUTUBE_VERIFY_SSL", "true").lower() != "false"
+
+    if verify_ssl:
+        try:
+            import certifi
+            http_client.verify = certifi.where()
+        except ImportError:
+            pass
+    else:
+        http_client.verify = False
+        import urllib3
+        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
     proxies = {}
     if http_proxy:

@@ -76,21 +76,38 @@ Rules:
 
 
 # ---------------------------------------------------------------------------
+# Helper: read config from Streamlit Secrets or environment variables
+# ---------------------------------------------------------------------------
+
+def _get_secret_or_env(key: str, default: str | None = None) -> str | None:
+    """Get a config value from Streamlit Secrets first, then os.environ / .env.
+
+    This allows the same code to work both on Streamlit Cloud (where secrets
+    are set via the dashboard) and locally (where values come from the .env file).
+    """
+    try:
+        import streamlit as st
+        return st.secrets.get(key, os.getenv(key, default))
+    except Exception:
+        return os.getenv(key, default)
+
+
+# ---------------------------------------------------------------------------
 # Proxy-aware YouTubeTranscriptApi factory
 # ---------------------------------------------------------------------------
 
 def _create_youtube_transcript_api():
     """Create YouTubeTranscriptApi with optional ScraperAPI proxy settings.
 
-    Reads the following environment variables (set them in .env):
+    Reads the following environment variables (set them in .env or Streamlit Secrets):
       YOUTUBE_PROXY_HTTP    — http proxy URL (e.g.
                               http://scraperapi:KEY@proxy-server.scraperapi.com:8001)
       YOUTUBE_PROXY_HTTPS   — https proxy URL (same format)
       YOUTUBE_VERIFY_SSL    — set to "false" to disable SSL verification (default "true")
     """
-    http_proxy = os.getenv("YOUTUBE_PROXY_HTTP")
-    https_proxy = os.getenv("YOUTUBE_PROXY_HTTPS")
-    verify_ssl = os.getenv("YOUTUBE_VERIFY_SSL", "true").lower() != "false"
+    http_proxy = _get_secret_or_env("YOUTUBE_PROXY_HTTP")
+    https_proxy = _get_secret_or_env("YOUTUBE_PROXY_HTTPS")
+    verify_ssl = _get_secret_or_env("YOUTUBE_VERIFY_SSL", "true").lower() != "false"
 
     http_client = Session()
 
@@ -125,7 +142,7 @@ class LinkedInPostAgent:
 
     def __init__(self):
         """Initialize the agent, loading the OpenAI API key from the environment."""
-        api_key = os.getenv("OPENAI_API_KEY")
+        api_key = _get_secret_or_env("OPENAI_API_KEY")
         if not api_key:
             raise EnvironmentError(
                 "OPENAI_API_KEY is not set. "
