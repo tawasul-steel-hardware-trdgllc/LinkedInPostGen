@@ -24,10 +24,20 @@ ENV_VARS_TO_CHECK = [
 
 
 def _get_secret_or_env(key: str, default: str | None = None) -> str | None:
-    """Get a config value from Streamlit Secrets first, then os.environ / .env."""
+    """Get a config value from Streamlit Secrets first, then os.environ / .env.
+
+    Handles TOML parsing: Streamlit Secrets uses TOML format where ``false``
+    and ``true`` are parsed as Python booleans, so this function converts
+    booleans back to their string representation.
+    """
     try:
         import streamlit as st
-        return st.secrets.get(key, os.getenv(key, default))
+        value = st.secrets.get(key)
+        if value is None:
+            value = os.getenv(key, default)
+        elif isinstance(value, bool):
+            value = "true" if value else "false"
+        return value
     except Exception:
         return os.getenv(key, default)
 
