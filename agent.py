@@ -93,7 +93,20 @@ def _create_youtube_transcript_api():
     verify_ssl = os.getenv("YOUTUBE_VERIFY_SSL", "true").lower() != "false"
 
     http_client = Session()
-    http_client.verify = verify_ssl
+
+    # On Windows, Python often can't find the system's CA certificates.
+    # Use certifi to provide a known-good CA bundle when verification is enabled.
+    if verify_ssl:
+        try:
+            import certifi
+            http_client.verify = certifi.where()
+        except ImportError:
+            pass  # fall back to default behaviour
+    else:
+        # Disable SSL verification (handles Windows cert store issues)
+        http_client.verify = False
+        import urllib3
+        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
     proxies = {}
     if http_proxy:
